@@ -46,10 +46,15 @@ enum Constants {
         static let notificationsEnabled = "notificationsEnabled"
         static let autoRetryEnabled = "autoRetryEnabled"
         static let autoRetryCount = "autoRetryCount"
-        static let completionAction = "completionAction" // none, openFile, openFolder
+        static let completionAction = "completionAction"
         static let proxyEnabled = "proxyEnabled"
         static let proxyHost = "proxyHost"
         static let proxyPort = "proxyPort"
+        static let clipboardMonitoring = "clipboardMonitoring"
+        static let themeMode = "themeMode" // system, dark, light
+        static let scheduledDownloadEnabled = "scheduledDownloadEnabled"
+        static let scheduledDownloadHour = "scheduledDownloadHour"
+        static let scheduledDownloadMinute = "scheduledDownloadMinute"
     }
 
     // Notification names

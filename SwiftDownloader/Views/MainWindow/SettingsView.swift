@@ -17,6 +17,11 @@ struct SettingsView: View {
     @AppStorage(Constants.Keys.proxyEnabled) private var proxyEnabled = false
     @AppStorage(Constants.Keys.proxyHost) private var proxyHost = ""
     @AppStorage(Constants.Keys.proxyPort) private var proxyPort = ""
+    @AppStorage(Constants.Keys.clipboardMonitoring) private var clipboardMonitoring = false
+    @AppStorage(Constants.Keys.themeMode) private var themeMode = "system"
+    @AppStorage(Constants.Keys.scheduledDownloadEnabled) private var scheduledEnabled = false
+    @AppStorage(Constants.Keys.scheduledDownloadHour) private var scheduledHour = 2
+    @AppStorage(Constants.Keys.scheduledDownloadMinute) private var scheduledMinute = 0
     @State private var downloadDirectory: String = FileOrganizer.shared.baseDownloadDirectory.path
     @Environment(\.dismiss) private var dismiss
 
@@ -33,6 +38,9 @@ struct SettingsView: View {
                     notificationsSection
                     autoRetrySection
                     completionActionSection
+                    themeSection
+                    clipboardSection
+                    scheduledSection
                     appBehaviorSection
                     appearanceSection
                     proxySection
@@ -167,6 +175,61 @@ struct SettingsView: View {
                 Text("Show in Finder").tag("openFolder")
             }
             .pickerStyle(.radioGroup)
+        }
+    }
+
+    private var themeSection: some View {
+        settingsSection("Theme", icon: "moon.fill") {
+            Picker("Appearance", selection: $themeMode) {
+                Text("System").tag("system")
+                Text("Dark").tag("dark")
+                Text("Light").tag("light")
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var clipboardSection: some View {
+        settingsSection("Clipboard", icon: "doc.on.clipboard") {
+            settingsToggle(isOn: $clipboardMonitoring, title: "Monitor clipboard",
+                           subtitle: "Auto-detect downloadable URLs from clipboard")
+                .onChange(of: clipboardMonitoring) { _, val in
+                    if val { ClipboardMonitor.shared.startMonitoring() }
+                    else { ClipboardMonitor.shared.stopMonitoring() }
+                }
+        }
+    }
+
+    private var scheduledSection: some View {
+        settingsSection("Scheduled Downloads", icon: "calendar.badge.clock") {
+            VStack(spacing: 14) {
+                settingsToggle(isOn: $scheduledEnabled, title: "Enable scheduled downloads",
+                               subtitle: "Queue downloads to start at a specific time")
+
+                if scheduledEnabled {
+                    Divider().background(Theme.border)
+                    HStack {
+                        Text("Start at")
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.textPrimary)
+                        Spacer()
+                        Picker("", selection: $scheduledHour) {
+                            ForEach(0..<24, id: \.self) { h in
+                                Text(String(format: "%02d", h)).tag(h)
+                            }
+                        }
+                        .frame(width: 60)
+                        Text(":")
+                            .foregroundColor(Theme.textTertiary)
+                        Picker("", selection: $scheduledMinute) {
+                            ForEach([0, 15, 30, 45], id: \.self) { m in
+                                Text(String(format: "%02d", m)).tag(m)
+                            }
+                        }
+                        .frame(width: 60)
+                    }
+                }
+            }
         }
     }
 

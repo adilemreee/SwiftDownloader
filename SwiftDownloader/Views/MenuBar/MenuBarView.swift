@@ -97,9 +97,17 @@ struct MenuBarView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.primaryGradient)
 
-            Text("SwiftDownloader")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(Theme.textPrimary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SwiftDownloader")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Theme.textPrimary)
+
+                if !activeItems.isEmpty {
+                    Text("\(activeItems.count) active · \(downloadManager.totalSpeed.formattedSpeed)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Theme.accent)
+                }
+            }
 
             Spacer()
 
