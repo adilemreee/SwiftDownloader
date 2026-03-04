@@ -33,7 +33,12 @@ struct DownloadListView: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(filteredItems) { item in
-                            DownloadRowView(item: item)
+                            DownloadRowView(item: item, onDelete: {
+                                downloadManager.cancelDownload(item: item)
+                                if selectedItem?.id == item.id { selectedItem = nil }
+                                modelContext.delete(item)
+                                try? modelContext.save()
+                            })
                                 .contentShape(Rectangle())
                                 .background(selectedItem?.id == item.id ? Theme.primary.opacity(0.1) : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall))

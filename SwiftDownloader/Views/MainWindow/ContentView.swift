@@ -35,7 +35,7 @@ struct ContentView: View {
                     downloadListPanel
                     Divider().background(Theme.border)
                     DownloadDetailView(item: item)
-                        .frame(minWidth: 300, idealWidth: 360)
+                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
                 }
             } else {
                 // Full width list when nothing selected

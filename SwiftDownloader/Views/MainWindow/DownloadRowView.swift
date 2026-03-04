@@ -5,6 +5,7 @@ struct DownloadRowView: View {
     @Bindable var item: DownloadItem
     @ObservedObject var downloadManager = DownloadManager.shared
     @State private var isHovered = false
+    var onDelete: (() -> Void)?
 
     private var speed: Double {
         downloadManager.speeds[item.id] ?? 0
@@ -16,8 +17,22 @@ struct DownloadRowView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            // Category Icon
-            CategoryIcon(category: item.category, size: 40)
+            // Category Icon with delete overlay on hover
+            ZStack(alignment: .topLeading) {
+                CategoryIcon(category: item.category, size: 40)
+
+                if isHovered, let onDelete = onDelete {
+                    Button(action: onDelete) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(Theme.error)
+                            .background(Circle().fill(Theme.surfacePrimary).frame(width: 14, height: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: -4, y: -4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.5)))
+                }
+            }
 
             // File Info
             VStack(alignment: .leading, spacing: 6) {
