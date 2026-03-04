@@ -1,201 +1,268 @@
 import Foundation
 import AppKit
 
-/// Downloads a single file using multiple concurrent HTTP Range requests (segments).
-/// Falls back to single-connection if the server doesn't support Range.
-actor SegmentedDownloader {
-    private let url: URL
-    private let destinationURL: URL
-    private let segmentCount: Int
-    private var totalBytes: Int64 = 0
-    private var downloadedBytes: [Int: Int64] = [:]
-    private var segmentTasks: [Int: URLSessionDataTask] = [:]
-    private var segmentData: [Int: Data] = [:]
-    private var completedSegments: Set<Int> = []
-    private var isCancelled = false
+/// Downloads a file using multiple concurrent URLSessionDownloadTask instances with HTTP Range headers.
+/// Each segment is a fast bulk download. Segments are merged after completion.
+/// Falls back to single connection if server doesn't support Range or file is small.
+@MainActor
+class SegmentedDownloadManager: NSObject, ObservableObject {
+    static let shared = SegmentedDownloadManager()
 
-    let onProgress: @Sendable (Int64, Int64, Double) -> Void // downloaded, total, speed
+    private var segmentSessions: [UUID: URLSession] = [:]
+    private var segmentDelegates: [UUID: SegmentDelegate] = [:]
+    private var activeSegmentedDownloads: Set<UUID> = []
 
-    init(url: URL, destinationURL: URL, segmentCount: Int = 4,
-         onProgress: @escaping @Sendable (Int64, Int64, Double) -> Void) {
-        self.url = url
-        self.destinationURL = destinationURL
-        self.segmentCount = segmentCount
-        self.onProgress = onProgress
-    }
+    let segmentCount = 4
+    let minFileSize: Int64 = 5 * 1024 * 1024 // 5MB minimum for segmented
 
-    /// Check if server supports Range requests and get file size
-    func getFileInfo() async -> (supportsRange: Bool, contentLength: Int64) {
+    /// Check if server supports Range and get file size
+    func checkRangeSupport(url: URL) async -> (supportsRange: Bool, contentLength: Int64) {
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return (false, 0)
-            }
-
-            let contentLength = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "0") ?? 0
-            let acceptRanges = httpResponse.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased()
-            let supportsRange = acceptRanges == "bytes" && contentLength > 0
-
-            return (supportsRange, contentLength)
+            guard let http = response as? HTTPURLResponse else { return (false, 0) }
+            let length = Int64(http.value(forHTTPHeaderField: "Content-Length") ?? "0") ?? 0
+            let accepts = http.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes"
+            return (accepts && length > 0, length)
         } catch {
             return (false, 0)
         }
     }
 
-    /// Start segmented download
-    func download() async throws -> URL {
-        let info = await getFileInfo()
-        totalBytes = info.contentLength
+    /// Start a segmented download. Returns true if segmented, false if should use normal download.
+    func startSegmentedDownload(
+        itemId: UUID,
+        url: URL,
+        fileName: String,
+        onProgress: @escaping @MainActor (Int64, Int64) -> Void,
+        onComplete: @escaping @MainActor (URL) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    ) {
+        activeSegmentedDownloads.insert(itemId)
 
-        // Only use segmented download for files > 5MB that support Range
-        let minSegmentSize: Int64 = 5 * 1024 * 1024
-        guard info.supportsRange && totalBytes > minSegmentSize else {
-            return try await singleConnectionDownload()
-        }
+        Task {
+            let info = await checkRangeSupport(url: url)
 
-        let segmentSize = totalBytes / Int64(segmentCount)
-        var segments: [(start: Int64, end: Int64)] = []
-
-        for i in 0..<segmentCount {
-            let start = Int64(i) * segmentSize
-            let end = (i == segmentCount - 1) ? (totalBytes - 1) : (start + segmentSize - 1)
-            segments.append((start, end))
-        }
-
-        // Initialize segment data
-        for i in 0..<segmentCount {
-            segmentData[i] = Data()
-            downloadedBytes[i] = 0
-        }
-
-        // Download all segments concurrently
-        try await withThrowingTaskGroup(of: (Int, Data).self) { group in
-            for (index, segment) in segments.enumerated() {
-                group.addTask { [url] in
-                    guard !Task.isCancelled else { throw CancellationError() }
-                    let data = try await self.downloadSegment(index: index, url: url, start: segment.start, end: segment.end)
-                    return (index, data)
+            guard info.supportsRange && info.contentLength >= minFileSize else {
+                // Not suitable for segmented — caller should use normal download
+                await MainActor.run {
+                    activeSegmentedDownloads.remove(itemId)
+                    onError(NSError(domain: "SegmentedDownload", code: -2,
+                                    userInfo: [NSLocalizedDescriptionKey: "USE_NORMAL_DOWNLOAD"]))
                 }
+                return
             }
 
-            for try await (index, data) in group {
-                segmentData[index] = data
-                completedSegments.insert(index)
+            await MainActor.run {
+                self.performSegmentedDownload(
+                    itemId: itemId,
+                    url: url,
+                    fileName: fileName,
+                    totalSize: info.contentLength,
+                    onProgress: onProgress,
+                    onComplete: onComplete,
+                    onError: onError
+                )
             }
         }
-
-        // Merge segments
-        return try assembleSegments()
     }
 
-    func cancel() {
-        isCancelled = true
-        for task in segmentTasks.values {
-            task.cancel()
-        }
-        segmentTasks.removeAll()
+    func cancelSegmented(itemId: UUID) {
+        segmentSessions[itemId]?.invalidateAndCancel()
+        segmentSessions.removeValue(forKey: itemId)
+        segmentDelegates.removeValue(forKey: itemId)
+        activeSegmentedDownloads.remove(itemId)
+    }
+
+    func isSegmented(_ itemId: UUID) -> Bool {
+        activeSegmentedDownloads.contains(itemId)
     }
 
     // MARK: - Private
 
-    private func downloadSegment(index: Int, url: URL, start: Int64, end: Int64) async throws -> Data {
-        var request = URLRequest(url: url)
-        request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
-        request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+    private func performSegmentedDownload(
+        itemId: UUID,
+        url: URL,
+        fileName: String,
+        totalSize: Int64,
+        onProgress: @escaping @MainActor (Int64, Int64) -> Void,
+        onComplete: @escaping @MainActor (URL) -> Void,
+        onError: @escaping @MainActor (Error) -> Void
+    ) {
+        let segSize = totalSize / Int64(segmentCount)
+        var ranges: [(Int64, Int64)] = []
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) || httpResponse.statusCode == 206 else {
-            throw URLError(.badServerResponse)
-        }
-
-        var data = Data()
-        let expectedSize = end - start + 1
-        data.reserveCapacity(Int(expectedSize))
-
-        var lastReport = CFAbsoluteTimeGetCurrent()
-
-        for try await byte in bytes {
-            guard !isCancelled else { throw CancellationError() }
-            data.append(byte)
-
-            let now = CFAbsoluteTimeGetCurrent()
-            if now - lastReport >= 0.3 {
-                lastReport = now
-                let segmentDownloaded = Int64(data.count)
-                await updateProgress(segment: index, downloaded: segmentDownloaded)
-            }
-        }
-
-        await updateProgress(segment: index, downloaded: Int64(data.count))
-        return data
-    }
-
-    private func updateProgress(segment: Int, downloaded: Int64) {
-        downloadedBytes[segment] = downloaded
-        let totalDown = downloadedBytes.values.reduce(0, +)
-        let speed = Double(totalDown) / max(1, CFAbsoluteTimeGetCurrent() - 1)
-        onProgress(totalDown, totalBytes, speed)
-    }
-
-    private func assembleSegments() throws -> URL {
-        let parentDir = destinationURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-
-        var mergedData = Data()
         for i in 0..<segmentCount {
-            guard let data = segmentData[i] else {
-                throw NSError(domain: "SegmentedDownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing segment \(i)"])
-            }
-            mergedData.append(data)
+            let start = Int64(i) * segSize
+            let end = (i == segmentCount - 1) ? (totalSize - 1) : (start + segSize - 1)
+            ranges.append((start, end))
         }
 
-        try mergedData.write(to: destinationURL)
-        return destinationURL
+        let delegate = SegmentDelegate(
+            itemId: itemId,
+            segmentCount: segmentCount,
+            totalSize: totalSize,
+            fileName: fileName,
+            onProgress: onProgress,
+            onComplete: { [weak self] resultURL in
+                self?.segmentSessions.removeValue(forKey: itemId)
+                self?.segmentDelegates.removeValue(forKey: itemId)
+                self?.activeSegmentedDownloads.remove(itemId)
+                onComplete(resultURL)
+            },
+            onError: { [weak self] error in
+                self?.segmentSessions.removeValue(forKey: itemId)
+                self?.segmentDelegates.removeValue(forKey: itemId)
+                self?.activeSegmentedDownloads.remove(itemId)
+                onError(error)
+            }
+        )
+
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = segmentCount
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60 * 60 * 24
+
+        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+
+        segmentDelegates[itemId] = delegate
+        segmentSessions[itemId] = session
+
+        // Start all segment downloads
+        for (index, range) in ranges.enumerated() {
+            var request = URLRequest(url: url)
+            request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("bytes=\(range.0)-\(range.1)", forHTTPHeaderField: "Range")
+
+            let task = session.downloadTask(with: request)
+            delegate.registerTask(task, forSegment: index)
+            task.resume()
+        }
+    }
+}
+
+// MARK: - Segment Delegate
+
+/// Handles download callbacks for all segments of a single file download.
+private class SegmentDelegate: NSObject, URLSessionDownloadDelegate {
+    let itemId: UUID
+    let segmentCount: Int
+    let totalSize: Int64
+    let fileName: String
+
+    private var taskToSegment: [Int: Int] = [:] // taskIdentifier -> segment index
+    private var segmentFiles: [Int: URL] = [:]
+    private var segmentBytes: [Int: Int64] = [:]
+    private var completedCount = 0
+    private var lastProgressReport: CFAbsoluteTime = 0
+
+    let onProgress: @MainActor (Int64, Int64) -> Void
+    let onComplete: @MainActor (URL) -> Void
+    let onError: @MainActor (Error) -> Void
+
+    init(itemId: UUID, segmentCount: Int, totalSize: Int64, fileName: String,
+         onProgress: @escaping @MainActor (Int64, Int64) -> Void,
+         onComplete: @escaping @MainActor (URL) -> Void,
+         onError: @escaping @MainActor (Error) -> Void) {
+        self.itemId = itemId
+        self.segmentCount = segmentCount
+        self.totalSize = totalSize
+        self.fileName = fileName
+        self.onProgress = onProgress
+        self.onComplete = onComplete
+        self.onError = onError
     }
 
-    private func singleConnectionDownload() async throws -> URL {
-        var request = URLRequest(url: url)
-        request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
+    func registerTask(_ task: URLSessionDownloadTask, forSegment index: Int) {
+        taskToSegment[task.taskIdentifier] = index
+    }
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
+    // Download progress for each segment
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                    totalBytesExpectedToWrite: Int64) {
+        guard let segIndex = taskToSegment[downloadTask.taskIdentifier] else { return }
+        segmentBytes[segIndex] = totalBytesWritten
+
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastProgressReport >= 0.3 else { return }
+        lastProgressReport = now
+
+        let totalDown = segmentBytes.values.reduce(0, +)
+        Task { @MainActor in
+            onProgress(totalDown, totalSize)
         }
+    }
 
-        let contentLength = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "0") ?? 0
-        totalBytes = contentLength
+    // Segment completed — save temp file
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didFinishDownloadingTo location: URL) {
+        guard let segIndex = taskToSegment[downloadTask.taskIdentifier] else { return }
 
-        var data = Data()
-        if contentLength > 0 { data.reserveCapacity(Int(contentLength)) }
+        // Copy to a safe temp location before URLSession deletes it
+        let tempDir = FileManager.default.temporaryDirectory
+        let safePath = tempDir.appendingPathComponent("seg_\(itemId)_\(segIndex).tmp")
+        try? FileManager.default.removeItem(at: safePath)
 
-        var lastReport = CFAbsoluteTimeGetCurrent()
-        let startTime = lastReport
+        do {
+            try FileManager.default.moveItem(at: location, to: safePath)
+            segmentFiles[segIndex] = safePath
+            completedCount += 1
 
-        for try await byte in bytes {
-            guard !isCancelled else { throw CancellationError() }
-            data.append(byte)
-
-            let now = CFAbsoluteTimeGetCurrent()
-            if now - lastReport >= 0.3 {
-                lastReport = now
-                let elapsed = now - startTime
-                let speed = elapsed > 0 ? Double(data.count) / elapsed : 0
-                onProgress(Int64(data.count), totalBytes, speed)
+            // All segments done — merge
+            if completedCount == segmentCount {
+                mergeSegments()
             }
+        } catch {
+            Task { @MainActor in onError(error) }
         }
+    }
 
-        let parentDir = destinationURL.deletingLastPathComponent()
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let error = error as? NSError else { return }
+        if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return }
+        Task { @MainActor in onError(error) }
+    }
+
+    // Merge all segment files into the final destination
+    private func mergeSegments() {
+        let destination = FileOrganizer.shared.destinationURL(for: fileName)
+        let parentDir = destination.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-        try data.write(to: destinationURL)
 
-        onProgress(Int64(data.count), totalBytes, 0)
-        return destinationURL
+        do {
+            // Remove existing file
+            try? FileManager.default.removeItem(at: destination)
+
+            // Create output file
+            FileManager.default.createFile(atPath: destination.path, contents: nil)
+            let fileHandle = try FileHandle(forWritingTo: destination)
+
+            // Write segments in order
+            for i in 0..<segmentCount {
+                guard let segURL = segmentFiles[i] else {
+                    throw NSError(domain: "SegmentedDownload", code: -1,
+                                  userInfo: [NSLocalizedDescriptionKey: "Missing segment \(i)"])
+                }
+                let data = try Data(contentsOf: segURL)
+                fileHandle.write(data)
+                try? FileManager.default.removeItem(at: segURL)
+            }
+
+            fileHandle.closeFile()
+
+            Task { @MainActor in
+                onComplete(destination)
+            }
+        } catch {
+            // Cleanup temp files
+            for url in segmentFiles.values {
+                try? FileManager.default.removeItem(at: url)
+            }
+            Task { @MainActor in onError(error) }
+        }
     }
 }

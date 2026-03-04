@@ -73,6 +73,7 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func pauseDownload(item: DownloadItem) {
+        SegmentedDownloadManager.shared.cancelSegmented(itemId: item.id)
         guard let info = activeDownloads[item.id] else { return }
         info.task.cancel(byProducingResumeData: { [weak self] resumeData in
             Task { @MainActor in
@@ -109,6 +110,7 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func cancelDownload(item: DownloadItem) {
+        SegmentedDownloadManager.shared.cancelSegmented(itemId: item.id)
         if let info = activeDownloads[item.id] {
             info.task.cancel()
             activeDownloads.removeValue(forKey: item.id)
@@ -134,6 +136,7 @@ class DownloadManager: NSObject, ObservableObject {
     func pauseAll() {
         let items = Array(activeDownloads.keys)
         for id in items {
+            SegmentedDownloadManager.shared.cancelSegmented(itemId: id)
             if let info = activeDownloads[id] {
                 info.task.cancel(byProducingResumeData: { _ in })
                 activeDownloads.removeValue(forKey: id)
@@ -154,16 +157,100 @@ class DownloadManager: NSObject, ObservableObject {
     // MARK: - Private
 
     private func beginDownload(item: DownloadItem, url: URL) {
+        item.status = .downloading
+
+        let itemId = item.id
+        let tracker = SpeedTracker()
+
+        // Try segmented download first
+        SegmentedDownloadManager.shared.startSegmentedDownload(
+            itemId: itemId,
+            url: url,
+            fileName: item.fileName,
+            onProgress: { [weak self] downloaded, total in
+                guard let self = self else { return }
+                let now = CFAbsoluteTimeGetCurrent()
+                let lastUpdate = self.lastUIUpdateTime[itemId] ?? 0
+                guard now - lastUpdate >= 0.4 else { return }
+                self.lastUIUpdateTime[itemId] = now
+
+                if var info = self.activeDownloads[itemId] {
+                    info.downloadedBytes = downloaded
+                    info.totalBytes = total
+                    info.speedTracker.addSample(totalBytes: downloaded)
+                    self.activeDownloads[itemId] = info
+                    self.speeds[itemId] = info.speedTracker.currentSpeed
+                    self.etas[itemId] = info.speedTracker.estimatedTimeRemaining(
+                        totalBytes: total, downloadedBytes: downloaded
+                    )
+                    self.updateTotalSpeed()
+                }
+
+                if let item = self.findItem?(itemId) {
+                    item.downloadedBytes = downloaded
+                    item.totalBytes = total
+                }
+                self.updateDockBadge()
+            },
+            onComplete: { [weak self] resultURL in
+                guard let self = self, let item = self.findItem?(itemId) else { return }
+                item.destinationPath = resultURL.path
+                item.status = .completed
+                item.dateCompleted = Date()
+                item.downloadedBytes = item.totalBytes
+                self.retryAttempts.removeValue(forKey: itemId)
+
+                if UserDefaults.standard.bool(forKey: Constants.Keys.notificationsEnabled) {
+                    NotificationService.shared.showDownloadComplete(fileName: item.fileName, path: resultURL.path)
+                }
+                NotificationService.shared.playCompletionSound()
+                NSApp.dockTile.badgeLabel = nil
+                self.performCompletionAction(for: item)
+
+                self.activeDownloads.removeValue(forKey: itemId)
+                self.speeds.removeValue(forKey: itemId)
+                self.etas.removeValue(forKey: itemId)
+                self.lastUIUpdateTime.removeValue(forKey: itemId)
+                self.updateTotalSpeed()
+                self.processQueue()
+            },
+            onError: { [weak self] error in
+                guard let self = self else { return }
+
+                // Fallback: server doesn't support Range → use normal download
+                if (error as NSError).localizedDescription == "USE_NORMAL_DOWNLOAD" {
+                    self.beginNormalDownload(item: self.findItem?(itemId) ?? item, url: url, tracker: tracker)
+                    return
+                }
+
+                if let item = self.findItem?(itemId) {
+                    item.status = .failed
+                    item.errorMessage = error.localizedDescription
+                    self.handleAutoRetry(item: item)
+                }
+                self.activeDownloads.removeValue(forKey: itemId)
+                self.speeds.removeValue(forKey: itemId)
+                self.etas.removeValue(forKey: itemId)
+                self.lastUIUpdateTime.removeValue(forKey: itemId)
+                self.updateTotalSpeed()
+                self.processQueue()
+            }
+        )
+
+        // Placeholder for active tracking
+        let placeholderTask = session.downloadTask(with: url)
+        activeDownloads[itemId] = ActiveDownloadInfo(task: placeholderTask, speedTracker: tracker)
+    }
+
+    /// Normal single-connection download (fallback)
+    private func beginNormalDownload(item: DownloadItem, url: URL, tracker: SpeedTracker) {
         var request = URLRequest(url: url)
         request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
 
         let task = session.downloadTask(with: request)
-        let tracker = SpeedTracker()
-
         activeDownloads[item.id] = ActiveDownloadInfo(task: task, speedTracker: tracker)
         downloadToItem[task.taskIdentifier] = item.id
         item.status = .downloading
-
         task.resume()
     }
 
