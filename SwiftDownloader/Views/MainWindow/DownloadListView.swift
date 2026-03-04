@@ -34,6 +34,7 @@ struct DownloadListView: View {
                     LazyVStack(spacing: 2) {
                         ForEach(filteredItems) { item in
                             DownloadRowView(item: item)
+                                .contentShape(Rectangle())
                                 .background(selectedItem?.id == item.id ? Theme.primary.opacity(0.1) : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall))
                                 .onTapGesture {
@@ -52,13 +53,6 @@ struct DownloadListView: View {
                     // Bandwidth chart when downloads are active
                     if !downloadManager.activeDownloads.isEmpty {
                         BandwidthChartView()
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 8)
-                    }
-
-                    // Statistics
-                    if selectedFilter == .all {
-                        StatisticsView()
                             .padding(.horizontal, 8)
                             .padding(.bottom, 8)
                     }

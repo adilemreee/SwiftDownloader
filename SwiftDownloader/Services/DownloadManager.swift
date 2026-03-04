@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 struct ActiveDownloadInfo {
     let task: URLSessionDownloadTask
@@ -22,6 +23,7 @@ class DownloadManager: NSObject, ObservableObject {
     private var downloadToItem: [Int: UUID] = [:]
     private var lastUIUpdateTime: [UUID: CFAbsoluteTime] = [:]
     private var retryAttempts: [UUID: Int] = [:]
+    private var segmentedDownloaders: [UUID: SegmentedDownloader] = [:]
 
     var maxConcurrentDownloads: Int {
         get { UserDefaults.standard.integer(forKey: Constants.Keys.maxConcurrentDownloads).clamped(to: 1...10) }
@@ -72,15 +74,21 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func pauseDownload(item: DownloadItem) {
+        // Cancel segmented downloader if active
+        if let downloader = segmentedDownloaders[item.id] {
+            Task { await downloader.cancel() }
+            cleanupDownload(itemId: item.id)
+            item.status = .paused
+            processQueue()
+            return
+        }
+
         guard let info = activeDownloads[item.id] else { return }
         info.task.cancel(byProducingResumeData: { [weak self] resumeData in
             Task { @MainActor in
                 item.resumeData = resumeData
                 item.status = .paused
-                self?.activeDownloads.removeValue(forKey: item.id)
-                self?.speeds.removeValue(forKey: item.id)
-                self?.etas.removeValue(forKey: item.id)
-                self?.updateTotalSpeed()
+                self?.cleanupDownload(itemId: item.id)
                 self?.processQueue()
             }
         })
@@ -107,13 +115,14 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     func cancelDownload(item: DownloadItem) {
+        // Cancel segmented downloader if active
+        if let downloader = segmentedDownloaders[item.id] {
+            Task { await downloader.cancel() }
+        }
         if let info = activeDownloads[item.id] {
             info.task.cancel()
-            activeDownloads.removeValue(forKey: item.id)
-            speeds.removeValue(forKey: item.id)
-            etas.removeValue(forKey: item.id)
-            updateTotalSpeed()
         }
+        cleanupDownload(itemId: item.id)
         pendingQueue.removeAll { $0.id == item.id }
         item.status = .cancelled
         item.resumeData = nil
@@ -131,15 +140,14 @@ class DownloadManager: NSObject, ObservableObject {
     func pauseAll() {
         let items = Array(activeDownloads.keys)
         for id in items {
-            // Find the item and pause - caller should manage
+            if let downloader = segmentedDownloaders[id] {
+                Task { await downloader.cancel() }
+            }
             if let info = activeDownloads[id] {
                 info.task.cancel(byProducingResumeData: { _ in })
-                activeDownloads.removeValue(forKey: id)
             }
+            cleanupDownload(itemId: id)
         }
-        speeds.removeAll()
-        etas.removeAll()
-        updateTotalSpeed()
     }
 
     func resumeAll(items: [DownloadItem]) {
@@ -151,17 +159,93 @@ class DownloadManager: NSObject, ObservableObject {
     // MARK: - Private
 
     private func beginDownload(item: DownloadItem, url: URL) {
-        var request = URLRequest(url: url)
-        request.setValue("SwiftDownloader/1.0", forHTTPHeaderField: "User-Agent")
-
-        let task = session.downloadTask(with: request)
-        let tracker = SpeedTracker()
-
-        activeDownloads[item.id] = ActiveDownloadInfo(task: task, speedTracker: tracker)
-        downloadToItem[task.taskIdentifier] = item.id
+        let destination = FileOrganizer.shared.destinationURL(for: item.fileName)
         item.status = .downloading
 
-        task.resume()
+        let itemId = item.id
+        let tracker = SpeedTracker()
+        let dummyTask = session.downloadTask(with: url) // placeholder for active tracking
+        activeDownloads[itemId] = ActiveDownloadInfo(task: dummyTask, speedTracker: tracker)
+
+        let downloader = SegmentedDownloader(
+            url: url,
+            destinationURL: destination,
+            segmentCount: 4
+        ) { [weak self] downloaded, total, speed in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let now = CFAbsoluteTimeGetCurrent()
+                let lastUpdate = self.lastUIUpdateTime[itemId] ?? 0
+                guard now - lastUpdate >= 0.4 else { return }
+                self.lastUIUpdateTime[itemId] = now
+
+                if var info = self.activeDownloads[itemId] {
+                    info.downloadedBytes = downloaded
+                    info.totalBytes = total
+                    info.speedTracker.addSample(totalBytes: downloaded)
+                    self.activeDownloads[itemId] = info
+                    self.speeds[itemId] = info.speedTracker.currentSpeed
+                    self.etas[itemId] = info.speedTracker.estimatedTimeRemaining(
+                        totalBytes: total, downloadedBytes: downloaded
+                    )
+                    self.updateTotalSpeed()
+                }
+
+                if let item = self.findItem?(itemId) {
+                    item.downloadedBytes = downloaded
+                    item.totalBytes = total
+                }
+
+                self.updateDockBadge()
+            }
+        }
+
+        segmentedDownloaders[itemId] = downloader
+
+        Task {
+            do {
+                let resultURL = try await downloader.download()
+                await MainActor.run {
+                    guard let item = self.findItem?(itemId) else { return }
+                    item.destinationPath = resultURL.path
+                    item.status = .completed
+                    item.dateCompleted = Date()
+                    item.downloadedBytes = item.totalBytes
+                    self.retryAttempts.removeValue(forKey: itemId)
+
+                    if UserDefaults.standard.bool(forKey: Constants.Keys.notificationsEnabled) {
+                        NotificationService.shared.showDownloadComplete(fileName: item.fileName, path: resultURL.path)
+                    }
+                    NotificationService.shared.playCompletionSound()
+                    NSApp.dockTile.badgeLabel = nil
+                    self.performCompletionAction(for: item)
+
+                    self.cleanupDownload(itemId: itemId)
+                    self.processQueue()
+                }
+            } catch {
+                if error is CancellationError { return }
+                await MainActor.run {
+                    guard let item = self.findItem?(itemId) else { return }
+                    item.status = .failed
+                    item.errorMessage = error.localizedDescription
+
+                    self.cleanupDownload(itemId: itemId)
+                    self.handleAutoRetry(item: item)
+                    self.processQueue()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func cleanupDownload(itemId: UUID) {
+        activeDownloads.removeValue(forKey: itemId)
+        speeds.removeValue(forKey: itemId)
+        etas.removeValue(forKey: itemId)
+        lastUIUpdateTime.removeValue(forKey: itemId)
+        segmentedDownloaders.removeValue(forKey: itemId)
+        updateTotalSpeed()
     }
 
     private func processQueue() {
