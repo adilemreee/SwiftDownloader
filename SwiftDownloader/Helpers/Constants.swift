@@ -42,6 +42,14 @@ enum Constants {
         static let launchAtLogin = "launchAtLogin"
         static let startMinimized = "startMinimized"
         static let hideFromDock = "hideFromDock"
+        static let soundEnabled = "soundEnabled"
+        static let notificationsEnabled = "notificationsEnabled"
+        static let autoRetryEnabled = "autoRetryEnabled"
+        static let autoRetryCount = "autoRetryCount"
+        static let completionAction = "completionAction" // none, openFile, openFolder
+        static let proxyEnabled = "proxyEnabled"
+        static let proxyHost = "proxyHost"
+        static let proxyPort = "proxyPort"
     }
 
     // Notification names

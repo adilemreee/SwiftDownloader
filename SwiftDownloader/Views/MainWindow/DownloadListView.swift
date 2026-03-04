@@ -48,6 +48,20 @@ struct DownloadListView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
+
+                    // Bandwidth chart when downloads are active
+                    if !downloadManager.activeDownloads.isEmpty {
+                        BandwidthChartView()
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
+                    }
+
+                    // Statistics
+                    if selectedFilter == .all {
+                        StatisticsView()
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
         }

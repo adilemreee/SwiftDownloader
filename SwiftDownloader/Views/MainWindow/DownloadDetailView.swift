@@ -3,6 +3,10 @@ import SwiftUI
 struct DownloadDetailView: View {
     @Bindable var item: DownloadItem
     @ObservedObject var downloadManager = DownloadManager.shared
+    @State private var hashResult: String?
+    @State private var isVerifyingHash = false
+    @State private var hashInput = ""
+    @State private var selectedHashType: HashType = .sha256
 
     private var speed: Double { downloadManager.speeds[item.id] ?? 0 }
     private var eta: TimeInterval { downloadManager.etas[item.id] ?? .infinity }
@@ -10,24 +14,29 @@ struct DownloadDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Header
                 headerSection
-
                 Divider().background(Theme.border)
 
-                // Progress section
+                // File preview for completed downloads
+                if item.status == .completed {
+                    FilePreviewView(item: item)
+                }
+
+                // Progress
                 if item.status.isActive || item.status == .paused {
                     progressSection
                 }
 
-                // Info section
                 infoSection
-
                 Divider().background(Theme.border)
 
-                // Actions
-                actionButtons
+                // Hash verification for completed files
+                if item.status == .completed {
+                    hashSection
+                    Divider().background(Theme.border)
+                }
 
+                actionButtons
                 Spacer()
             }
             .padding(24)
@@ -40,16 +49,13 @@ struct DownloadDetailView: View {
     private var headerSection: some View {
         HStack(spacing: 16) {
             CategoryIcon(category: item.category, size: 56)
-
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.fileName)
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
                     .lineLimit(2)
-
                 StatusBadge(status: item.status)
             }
-
             Spacer()
         }
     }
@@ -64,15 +70,12 @@ struct DownloadDetailView: View {
                 Text(item.progressPercentage)
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.primary)
-
                 Spacer()
-
                 if item.status == .downloading {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(speed.formattedSpeed)
                             .font(.system(size: 14, weight: .semibold, design: .monospaced))
                             .foregroundColor(Theme.textPrimary)
-
                         if !eta.isInfinite {
                             Text("\(eta.formattedETA) remaining")
                                 .font(.system(size: 12))
@@ -111,6 +114,9 @@ struct DownloadDetailView: View {
             if item.status == .completed {
                 infoRow(label: "Location", value: item.destinationPath)
             }
+            if item.totalBytes > 0 {
+                infoRow(label: "File Size", value: item.totalBytes.formattedFileSize)
+            }
             if let error = item.errorMessage {
                 infoRow(label: "Error", value: error, valueColor: Theme.error)
             }
@@ -123,14 +129,80 @@ struct DownloadDetailView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Theme.textTertiary)
                 .frame(width: 80, alignment: .leading)
-
             Text(value)
                 .font(.system(size: 12))
                 .foregroundColor(valueColor)
                 .lineLimit(3)
                 .textSelection(.enabled)
-
             Spacer()
+        }
+    }
+
+    // MARK: - Hash Verification
+
+    private var hashSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("File Integrity")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Theme.textSecondary)
+
+            HStack(spacing: 8) {
+                Picker("", selection: $selectedHashType) {
+                    ForEach(HashType.allCases, id: \.self) { type in
+                        Text(type.rawValue).tag(type)
+                    }
+                }
+                .frame(width: 100)
+
+                TextField("Expected hash (optional)", text: $hashInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+
+                Button(action: verifyHash) {
+                    if isVerifyingHash {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else {
+                        Text("Verify")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                }
+                .foregroundColor(Theme.primary)
+                .buttonStyle(.plain)
+                .disabled(isVerifyingHash)
+            }
+
+            if let result = hashResult {
+                Text(result)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(result.contains("✓") ? Theme.accent : Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+            }
+        }
+        .padding(14)
+        .background(Theme.surfaceTertiary.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+    }
+
+    private func verifyHash() {
+        isVerifyingHash = true
+        let url = URL(fileURLWithPath: item.destinationPath)
+        let type = selectedHashType
+        let expected = hashInput
+
+        Task {
+            if expected.isEmpty {
+                if let hash = await HashVerifier.computeHash(fileAt: url, type: type) {
+                    hashResult = "\(type.rawValue): \(hash)"
+                }
+            } else {
+                let result = await HashVerifier.verify(fileAt: url, expectedHash: expected, type: type)
+                hashResult = result.matches
+                    ? "✓ Hash matches! \(result.computed)"
+                    : "✗ Mismatch: \(result.computed)"
+            }
+            isVerifyingHash = false
         }
     }
 

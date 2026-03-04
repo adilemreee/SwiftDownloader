@@ -1,17 +1,30 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var downloadManager = DownloadManager.shared
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var selectedFilter: SidebarFilter = .all
     @State private var selectedItem: DownloadItem?
     @State private var searchText = ""
     @State private var showAddURL = false
     @State private var showSettings = false
     @State private var newURLText = ""
+    @State private var isDragOver = false
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
+        Group {
+            if !hasCompletedOnboarding {
+                OnboardingView()
+            } else {
+                mainView
+            }
+        }
+    }
+
+    private var mainView: some View {
         NavigationSplitView {
             sidebarView
                 .navigationSplitViewColumnWidth(min: 200, ideal: Theme.sidebarWidth, max: 280)
@@ -53,6 +66,28 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("clearAllDownloads"))) { _ in
             clearAllDownloads()
         }
+        // Drag & Drop URL
+        .onDrop(of: [.url, .text], isTargeted: $isDragOver) { providers in
+            handleDrop(providers: providers)
+        }
+        .overlay {
+            if isDragOver {
+                ZStack {
+                    Color.black.opacity(0.4)
+                    VStack(spacing: 12) {
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(Theme.primary)
+                        Text("Drop URL to download")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Theme.textPrimary)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        // Keyboard shortcuts
+        .keyboardShortcut("n", modifiers: .command)
     }
 
     // MARK: - Download List Panel
@@ -256,5 +291,48 @@ struct ContentView: View {
             try? modelContext.save()
         }
         selectedItem = nil
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.url.identifier) { item, _ in
+                    if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        DispatchQueue.main.async {
+                            addDownloadByURLString(url.absoluteString)
+                        }
+                    }
+                }
+                return true
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.text.identifier) { item, _ in
+                    if let text = item as? String, text.hasPrefix("http") {
+                        DispatchQueue.main.async {
+                            addDownloadByURLString(text)
+                        }
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private func addDownloadByURLString(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        let fileName = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
+        let destination = FileOrganizer.shared.destinationURL(for: fileName)
+        let category = FileCategory.from(extension: url.fileExtensionLowercased)
+
+        let item = DownloadItem(
+            url: urlString,
+            fileName: fileName,
+            destinationPath: destination.path,
+            category: category
+        )
+        modelContext.insert(item)
+        try? modelContext.save()
+        downloadManager.startDownload(item: item)
     }
 }

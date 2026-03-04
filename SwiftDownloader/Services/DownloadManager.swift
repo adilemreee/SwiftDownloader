@@ -21,6 +21,7 @@ class DownloadManager: NSObject, ObservableObject {
     private var pendingQueue: [DownloadItem] = []
     private var downloadToItem: [Int: UUID] = [:]
     private var lastUIUpdateTime: [UUID: CFAbsoluteTime] = [:]
+    private var retryAttempts: [UUID: Int] = [:]
 
     var maxConcurrentDownloads: Int {
         get { UserDefaults.standard.integer(forKey: Constants.Keys.maxConcurrentDownloads).clamped(to: 1...10) }
@@ -41,8 +42,15 @@ class DownloadManager: NSObject, ObservableObject {
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
 
         UserDefaults.standard.register(defaults: [
-            Constants.Keys.maxConcurrentDownloads: Constants.defaultMaxConcurrentDownloads
+            Constants.Keys.maxConcurrentDownloads: Constants.defaultMaxConcurrentDownloads,
+            Constants.Keys.soundEnabled: true,
+            Constants.Keys.notificationsEnabled: true,
+            Constants.Keys.autoRetryEnabled: true,
+            Constants.Keys.autoRetryCount: 3
         ])
+
+        // Initialize notification service
+        _ = NotificationService.shared
     }
 
     // MARK: - Public API
@@ -208,6 +216,23 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 item.downloadedBytes = totalBytesWritten
                 item.totalBytes = totalBytesExpectedToWrite
             }
+
+            // Dock badge progress
+            updateDockBadge()
+        }
+    }
+
+    @MainActor
+    private func updateDockBadge() {
+        guard !activeDownloads.isEmpty else {
+            NSApp.dockTile.badgeLabel = nil
+            return
+        }
+        let totalDown = activeDownloads.values.reduce(Int64(0)) { $0 + $1.downloadedBytes }
+        let totalExp = activeDownloads.values.reduce(Int64(0)) { $0 + $1.totalBytes }
+        if totalExp > 0 {
+            let pct = Int(Double(totalDown) / Double(totalExp) * 100)
+            NSApp.dockTile.badgeLabel = "\(pct)%"
         }
     }
 
@@ -236,7 +261,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 let organizer = FileOrganizer.shared
                 let destination = organizer.destinationURL(for: item.fileName)
 
-                // Ensure parent directory exists
                 let parentDir = destination.deletingLastPathComponent()
                 try? fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
 
@@ -246,6 +270,19 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     item.status = .completed
                     item.dateCompleted = Date()
                     item.downloadedBytes = item.totalBytes
+                    self.retryAttempts.removeValue(forKey: itemId)
+
+                    // Notification + Sound
+                    if UserDefaults.standard.bool(forKey: Constants.Keys.notificationsEnabled) {
+                        NotificationService.shared.showDownloadComplete(fileName: item.fileName, path: destination.path)
+                    }
+                    NotificationService.shared.playCompletionSound()
+
+                    // Dock badge progress
+                    NSApp.dockTile.badgeLabel = nil
+
+                    // Post-download action
+                    self.performCompletionAction(for: item)
                 } catch {
                     item.status = .failed
                     item.errorMessage = error.localizedDescription
@@ -261,7 +298,13 @@ extension DownloadManager: URLSessionDownloadDelegate {
             self.downloadToItem.removeValue(forKey: taskId)
             self.speeds.removeValue(forKey: itemId)
             self.etas.removeValue(forKey: itemId)
+            self.lastUIUpdateTime.removeValue(forKey: itemId)
             self.updateTotalSpeed()
+
+            // Auto-retry on failure
+            if item.status == .failed {
+                self.handleAutoRetry(item: item)
+            }
 
             self.processQueue()
         }
@@ -270,7 +313,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let error = error as? NSError else { return }
 
-        // Ignore cancellation errors (for pause)
         if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return }
 
         let taskId = task.taskIdentifier
@@ -286,9 +328,55 @@ extension DownloadManager: URLSessionDownloadDelegate {
             downloadToItem.removeValue(forKey: taskId)
             speeds.removeValue(forKey: itemId)
             etas.removeValue(forKey: itemId)
+            lastUIUpdateTime.removeValue(forKey: itemId)
             updateTotalSpeed()
 
+            handleAutoRetry(item: item)
             processQueue()
+        }
+    }
+
+    // MARK: - Auto Retry
+
+    @MainActor
+    private func handleAutoRetry(item: DownloadItem) {
+        guard UserDefaults.standard.bool(forKey: Constants.Keys.autoRetryEnabled) else {
+            if UserDefaults.standard.bool(forKey: Constants.Keys.notificationsEnabled) {
+                NotificationService.shared.showDownloadFailed(fileName: item.fileName, error: item.errorMessage ?? "Unknown")
+            }
+            return
+        }
+
+        let maxRetries = UserDefaults.standard.integer(forKey: Constants.Keys.autoRetryCount)
+        let attempts = retryAttempts[item.id, default: 0]
+
+        if attempts < maxRetries {
+            retryAttempts[item.id] = attempts + 1
+            // Delay retry by 2 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.retryDownload(item: item)
+            }
+        } else {
+            retryAttempts.removeValue(forKey: item.id)
+            if UserDefaults.standard.bool(forKey: Constants.Keys.notificationsEnabled) {
+                NotificationService.shared.showDownloadFailed(fileName: item.fileName, error: "Failed after \(maxRetries) retries")
+            }
+        }
+    }
+
+    // MARK: - Completion Action
+
+    @MainActor
+    private func performCompletionAction(for item: DownloadItem) {
+        let action = UserDefaults.standard.string(forKey: Constants.Keys.completionAction) ?? "none"
+        let fileURL = URL(fileURLWithPath: item.destinationPath)
+        switch action {
+        case "openFile":
+            NSWorkspace.shared.open(fileURL)
+        case "openFolder":
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        default:
+            break
         }
     }
 }
