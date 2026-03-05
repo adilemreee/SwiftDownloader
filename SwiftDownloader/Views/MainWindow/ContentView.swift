@@ -69,7 +69,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
-                .frame(width: 500, height: 600)
+                .frame(width: 680, height: 520)
                 .preferredColorScheme(.dark)
         }
         .onAppear {

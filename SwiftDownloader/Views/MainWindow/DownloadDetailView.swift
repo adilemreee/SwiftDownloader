@@ -144,17 +144,15 @@ struct DownloadDetailView: View {
     }
 
     private func infoRow(label: String, value: String, valueColor: Color = Theme.textPrimary) -> some View {
-        HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(Theme.textTertiary)
-                .frame(width: 80, alignment: .leading)
             Text(value)
                 .font(.system(size: 12))
                 .foregroundColor(valueColor)
-                .lineLimit(3)
                 .textSelection(.enabled)
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
