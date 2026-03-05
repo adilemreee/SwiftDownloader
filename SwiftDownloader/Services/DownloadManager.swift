@@ -84,6 +84,9 @@ class DownloadManager: NSObject, ObservableObject {
                 self?.etas.removeValue(forKey: item.id)
                 self?.lastUIUpdateTime.removeValue(forKey: item.id)
                 self?.updateTotalSpeed()
+                if self?.activeDownloads.isEmpty == true {
+                    NSApp.dockTile.badgeLabel = nil
+                }
                 self?.processQueue()
             }
         })
@@ -122,6 +125,9 @@ class DownloadManager: NSObject, ObservableObject {
         pendingQueue.removeAll { $0.id == item.id }
         item.status = .cancelled
         item.resumeData = nil
+        if activeDownloads.isEmpty {
+            NSApp.dockTile.badgeLabel = nil
+        }
         processQueue()
     }
 
@@ -146,6 +152,7 @@ class DownloadManager: NSObject, ObservableObject {
         etas.removeAll()
         lastUIUpdateTime.removeAll()
         updateTotalSpeed()
+        NSApp.dockTile.badgeLabel = nil
     }
 
     func resumeAll(items: [DownloadItem]) {
