@@ -59,7 +59,7 @@ final class DownloadItem {
     var downloadedBytes: Int64
     var status: DownloadStatus
     var category: FileCategory
-    var priority: DownloadPriority
+    var priority: DownloadPriority = .normal
     var dateAdded: Date
     var dateCompleted: Date?
     var scheduledDate: Date?
