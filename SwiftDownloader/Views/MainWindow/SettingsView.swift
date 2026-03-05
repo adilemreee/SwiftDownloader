@@ -433,7 +433,7 @@ struct SettingsView: View {
                 VStack(spacing: 14) {
                     aboutRow(label: "Developer", value: "Adil Emre")
                     Divider().background(Theme.border)
-                    aboutRow(label: "License", value: "MIT License")
+                    aboutRow(label: "License", value: "All Rights Reserved")
                     Divider().background(Theme.border)
                     aboutRow(label: "Platform", value: "macOS 14.0+")
                     Divider().background(Theme.border)
@@ -444,13 +444,11 @@ struct SettingsView: View {
             // Links
             settingsSection("Links", icon: "link") {
                 VStack(spacing: 14) {
-                    aboutLink(label: "GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com/adilemreee/SwiftDownloader")
+                    aboutLink(label: "Website", icon: "globe", url: "https://adilemree.xyz")
                     Divider().background(Theme.border)
-                    aboutLink(label: "Privacy Policy", icon: "hand.raised.fill", url: "https://adilemreee.github.io/SwiftDownloader/privacy.html")
+                    aboutLink(label: "Privacy Policy", icon: "hand.raised.fill", url: "https://adilemree.xyz/privacy")
                     Divider().background(Theme.border)
-                    aboutLink(label: "Support", icon: "questionmark.circle", url: "https://adilemreee.github.io/SwiftDownloader/support.html")
-                    Divider().background(Theme.border)
-                    aboutLink(label: "Report a Bug", icon: "ladybug", url: "https://github.com/adilemreee/SwiftDownloader/issues")
+                    aboutLink(label: "Support", icon: "questionmark.circle", url: "https://adilemree.xyz/support")
                 }
             }
         }
