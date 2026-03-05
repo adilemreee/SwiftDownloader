@@ -232,23 +232,31 @@ struct SettingsView: View {
 
     private var completionActionSection: some View {
         settingsSection("After Download Completes", icon: "checkmark.circle.fill") {
-            Picker("", selection: $completionAction) {
-                Text("Do nothing").tag("none")
-                Text("Open file").tag("openFile")
-                Text("Show in Finder").tag("openFolder")
+            VStack(spacing: 14) {
+                settingsPickerRow(title: "Action", selection: $completionAction, options: [
+                    ("none", "Do nothing"),
+                    ("openFile", "Open file"),
+                    ("openFolder", "Show in Finder")
+                ])
             }
-            .pickerStyle(.radioGroup)
         }
     }
 
     private var themeSection: some View {
         settingsSection("Theme", icon: "moon.fill") {
-            Picker("Appearance", selection: $themeMode) {
-                Text("System").tag("system")
-                Text("Dark").tag("dark")
-                Text("Light").tag("light")
+            HStack {
+                Text("Appearance")
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+                Spacer()
+                Picker("", selection: $themeMode) {
+                    Text("System").tag("system")
+                    Text("Dark").tag("dark")
+                    Text("Light").tag("light")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
             }
-            .pickerStyle(.segmented)
         }
     }
 
@@ -341,22 +349,27 @@ struct SettingsView: View {
 
     private var safariExtensionSection: some View {
         settingsSection("Safari Extension", icon: "safari.fill") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 14) {
                 HStack {
-                    Circle().fill(Theme.accent).frame(width: 8, height: 8)
-                    Text("Extension Installed")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(Theme.accent)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Circle().fill(Theme.accent).frame(width: 8, height: 8)
+                            Text("Extension Installed")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Theme.accent)
+                        }
+                        Text("Safari → Settings → Extensions → SwiftDownloader")
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.textTertiary)
+                    }
+                    Spacer()
+                    Button("Open Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Safari.Extensions")!)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Theme.primary)
+                    .buttonStyle(.plain)
                 }
-                Text("Safari → Settings → Extensions → SwiftDownloader")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textTertiary)
-                Button("Open Safari Extension Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Safari.Extensions")!)
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Theme.primary)
-                .buttonStyle(.plain)
             }
         }
     }
@@ -419,6 +432,21 @@ struct SettingsView: View {
         }
         .toggleStyle(.switch)
         .tint(Theme.primary)
+    }
+
+    private func settingsPickerRow(title: String, selection: Binding<String>, options: [(String, String)]) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13))
+                .foregroundColor(Theme.textPrimary)
+            Spacer()
+            Picker("", selection: selection) {
+                ForEach(options, id: \.0) { option in
+                    Text(option.1).tag(option.0)
+                }
+            }
+            .frame(width: 160)
+        }
     }
 
     private func chooseDirectory() {

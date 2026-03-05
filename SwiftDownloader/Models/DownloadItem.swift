@@ -80,6 +80,10 @@ final class DownloadItem {
         priority ?? .normal
     }
 
+    var fileExists: Bool {
+        FileManager.default.fileExists(atPath: destinationPath)
+    }
+
     init(
         url: String,
         fileName: String,

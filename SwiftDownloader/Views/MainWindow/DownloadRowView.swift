@@ -55,6 +55,16 @@ struct DownloadRowView: View {
                     }
 
                     StatusBadge(status: item.status)
+
+                    if item.status == .completed && !item.fileExists {
+                        Text("File Deleted")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(Theme.error)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Theme.error.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
                 }
 
                 // Progress Bar
