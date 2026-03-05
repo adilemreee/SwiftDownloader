@@ -510,14 +510,21 @@ struct SettingsView: View {
     }
 
     private func settingsToggle(isOn: Binding<Bool>, title: String, subtitle: String) -> some View {
-        Toggle(isOn: isOn) {
+        HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 13)).foregroundColor(Theme.textPrimary)
-                Text(subtitle).font(.system(size: 11)).foregroundColor(Theme.textTertiary)
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textTertiary)
             }
+            Spacer()
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .tint(Theme.primary)
+                .labelsHidden()
         }
-        .toggleStyle(.switch)
-        .tint(Theme.primary)
     }
 
     private func settingsPickerRow(title: String, selection: Binding<String>, options: [(String, String)]) -> some View {
