@@ -33,6 +33,7 @@ struct SettingsView: View {
         case appearance = "Appearance"
         case network = "Network"
         case advanced = "Advanced"
+        case about = "About"
 
         var icon: String {
             switch self {
@@ -41,6 +42,7 @@ struct SettingsView: View {
             case .appearance: return "paintbrush"
             case .network: return "network"
             case .advanced: return "wrench.and.screwdriver"
+            case .about: return "info.circle"
             }
         }
     }
@@ -107,6 +109,8 @@ struct SettingsView: View {
                         case .advanced:
                             notificationsSection
                             dangerZoneSection
+                        case .about:
+                            aboutSection
                         }
                         Spacer(minLength: 16)
                     }
@@ -399,6 +403,90 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var aboutSection: some View {
+        VStack(spacing: 20) {
+            // App identity
+            VStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(Theme.primaryGradient)
+
+                Text("SwiftDownloader")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(Theme.textPrimary)
+
+                Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textTertiary)
+
+                Text("Made with ❤️ using SwiftUI")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textTertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+
+            // Info rows
+            settingsSection("Info", icon: "info.circle") {
+                VStack(spacing: 14) {
+                    aboutRow(label: "Developer", value: "Adil Emre")
+                    Divider().background(Theme.border)
+                    aboutRow(label: "License", value: "MIT License")
+                    Divider().background(Theme.border)
+                    aboutRow(label: "Platform", value: "macOS 14.0+")
+                    Divider().background(Theme.border)
+                    aboutRow(label: "Framework", value: "SwiftUI + SwiftData")
+                }
+            }
+
+            // Links
+            settingsSection("Links", icon: "link") {
+                VStack(spacing: 14) {
+                    aboutLink(label: "GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com/adilemreee/SwiftDownloader")
+                    Divider().background(Theme.border)
+                    aboutLink(label: "Privacy Policy", icon: "hand.raised.fill", url: "https://adilemreee.github.io/SwiftDownloader/privacy.html")
+                    Divider().background(Theme.border)
+                    aboutLink(label: "Support", icon: "questionmark.circle", url: "https://adilemreee.github.io/SwiftDownloader/support.html")
+                    Divider().background(Theme.border)
+                    aboutLink(label: "Report a Bug", icon: "ladybug", url: "https://github.com/adilemreee/SwiftDownloader/issues")
+                }
+            }
+        }
+    }
+
+    private func aboutRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(Theme.textSecondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(Theme.textPrimary)
+        }
+    }
+
+    private func aboutLink(label: String, icon: String, url: String) -> some View {
+        Button {
+            if let url = URL(string: url) { NSWorkspace.shared.open(url) }
+        } label: {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.primary)
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
