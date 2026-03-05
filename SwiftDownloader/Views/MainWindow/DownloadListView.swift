@@ -44,7 +44,7 @@ struct DownloadListView: View {
             case .name: result = a.fileName.localizedCaseInsensitiveCompare(b.fileName) == .orderedAscending
             case .size: result = a.totalBytes > b.totalBytes
             case .status: result = a.status.rawValue < b.status.rawValue
-            case .priority: result = a.priority.sortOrder < b.priority.sortOrder
+            case .priority: result = a.safePriority.sortOrder < b.safePriority.sortOrder
             }
             return sortAscending ? !result : result
         }
@@ -370,7 +370,7 @@ struct DownloadListView: View {
                     HStack {
                         Image(systemName: p.icon)
                         Text(p.rawValue)
-                        if item.priority == p {
+                        if item.safePriority == p {
                             Image(systemName: "checkmark")
                         }
                     }

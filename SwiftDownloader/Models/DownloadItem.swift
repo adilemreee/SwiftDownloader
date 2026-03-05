@@ -59,7 +59,7 @@ final class DownloadItem {
     var downloadedBytes: Int64
     var status: DownloadStatus
     var category: FileCategory
-    var priority: DownloadPriority = DownloadPriority.normal
+    var priority: DownloadPriority?
     var dateAdded: Date
     var dateCompleted: Date?
     var scheduledDate: Date?
@@ -74,6 +74,10 @@ final class DownloadItem {
 
     var progressPercentage: String {
         String(format: "%.1f%%", progress * 100)
+    }
+
+    var safePriority: DownloadPriority {
+        priority ?? .normal
     }
 
     init(

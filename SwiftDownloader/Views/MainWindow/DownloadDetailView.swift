@@ -57,13 +57,13 @@ struct DownloadDetailView: View {
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     StatusBadge(status: item.status)
-                    if item.priority != .normal {
-                        Text(item.priority.rawValue)
+                    if item.safePriority != .normal {
+                        Text(item.safePriority.rawValue)
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(item.priority == .high ? Theme.error : Theme.textTertiary)
+                            .foregroundColor(item.safePriority == .high ? Theme.error : Theme.textTertiary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background((item.priority == .high ? Theme.error : Theme.textTertiary).opacity(0.12))
+                            .background((item.safePriority == .high ? Theme.error : Theme.textTertiary).opacity(0.12))
                             .clipShape(Capsule())
                     }
                 }

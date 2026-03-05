@@ -44,13 +44,13 @@ struct DownloadRowView: View {
 
                     Spacer()
 
-                    if item.priority != .normal {
-                        Text(item.priority.rawValue)
+                    if item.safePriority != .normal {
+                        Text(item.safePriority.rawValue)
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(item.priority == .high ? Theme.error : Theme.accent)
+                            .foregroundColor(item.safePriority == .high ? Theme.error : Theme.accent)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background((item.priority == .high ? Theme.error : Theme.accent).opacity(0.12))
+                            .background((item.safePriority == .high ? Theme.error : Theme.accent).opacity(0.12))
                             .clipShape(Capsule())
                     }
 
