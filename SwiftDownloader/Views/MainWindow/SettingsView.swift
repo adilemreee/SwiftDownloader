@@ -25,30 +25,93 @@ struct SettingsView: View {
     @State private var downloadDirectory: String = FileOrganizer.shared.baseDownloadDirectory.path
     @Environment(\.dismiss) private var dismiss
 
+    @State private var settingsTab: SettingsTab = .general
+
+    enum SettingsTab: String, CaseIterable {
+        case general = "General"
+        case downloads = "Downloads"
+        case appearance = "Appearance"
+        case network = "Network"
+        case advanced = "Advanced"
+
+        var icon: String {
+            switch self {
+            case .general: return "gear"
+            case .downloads: return "arrow.down.circle"
+            case .appearance: return "paintbrush"
+            case .network: return "network"
+            case .advanced: return "wrench.and.screwdriver"
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             headerView
             Divider().background(Theme.border)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    downloadLocationSection
-                    performanceSection
-                    fileOrganizationSection
-                    notificationsSection
-                    autoRetrySection
-                    completionActionSection
-                    themeSection
-                    clipboardSection
-                    scheduledSection
-                    appBehaviorSection
-                    appearanceSection
-                    proxySection
-                    safariExtensionSection
-                    dangerZoneSection
-                    Spacer(minLength: 16)
+            HStack(spacing: 0) {
+                // Tab sidebar
+                VStack(spacing: 2) {
+                    ForEach(SettingsTab.allCases, id: \.self) { tab in
+                        Button {
+                            withAnimation(Theme.quickAnimation) { settingsTab = tab }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: tab.icon)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(settingsTab == tab ? Theme.primary : Theme.textTertiary)
+                                    .frame(width: 18)
+                                Text(tab.rawValue)
+                                    .font(.system(size: 12, weight: settingsTab == tab ? .semibold : .regular))
+                                    .foregroundColor(settingsTab == tab ? Theme.textPrimary : Theme.textSecondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(settingsTab == tab ? Theme.primary.opacity(0.1) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
                 }
-                .padding(24)
+                .frame(width: 140)
+                .padding(10)
+                .background(Theme.surfaceSecondary)
+
+                Divider().background(Theme.border)
+
+                // Tab content
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        switch settingsTab {
+                        case .general:
+                            downloadLocationSection
+                            appBehaviorSection
+                            safariExtensionSection
+                        case .downloads:
+                            performanceSection
+                            fileOrganizationSection
+                            autoRetrySection
+                            completionActionSection
+                            clipboardSection
+                            scheduledSection
+                        case .appearance:
+                            themeSection
+                            appearanceSection
+                        case .network:
+                            proxySection
+                        case .advanced:
+                            notificationsSection
+                            dangerZoneSection
+                        }
+                        Spacer(minLength: 16)
+                    }
+                    .padding(24)
+                }
             }
         }
         .background(Theme.surfacePrimary)

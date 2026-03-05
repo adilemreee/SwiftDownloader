@@ -36,13 +36,23 @@ struct DownloadRowView: View {
 
             // File Info
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(item.fileName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Theme.textPrimary)
                         .lineLimit(1)
 
                     Spacer()
+
+                    if item.priority != .normal {
+                        Text(item.priority.rawValue)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(item.priority == .high ? Theme.error : Theme.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background((item.priority == .high ? Theme.error : Theme.accent).opacity(0.12))
+                            .clipShape(Capsule())
+                    }
 
                     StatusBadge(status: item.status)
                 }
@@ -91,6 +101,24 @@ struct DownloadRowView: View {
                     // Completed date
                     if item.status == .completed, let date = item.dateCompleted {
                         Text(date.relativeFormatted)
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.textTertiary)
+                    }
+
+                    // Scheduled date
+                    if item.status == .scheduled, let date = item.scheduledDate {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.system(size: 10))
+                            Text(date, style: .time)
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(Theme.accent)
+                    }
+
+                    // Added date for idle items
+                    if item.status == .waiting || item.status == .failed || item.status == .cancelled {
+                        Text(item.dateAdded.relativeFormatted)
                             .font(.system(size: 11))
                             .foregroundColor(Theme.textTertiary)
                     }

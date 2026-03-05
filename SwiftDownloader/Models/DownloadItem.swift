@@ -27,6 +27,28 @@ enum DownloadStatus: String, Codable {
     }
 }
 
+enum DownloadPriority: String, Codable, CaseIterable {
+    case high = "High"
+    case normal = "Normal"
+    case low = "Low"
+
+    var sortOrder: Int {
+        switch self {
+        case .high: return 0
+        case .normal: return 1
+        case .low: return 2
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .high: return "arrow.up.circle.fill"
+        case .normal: return "minus.circle.fill"
+        case .low: return "arrow.down.circle"
+        }
+    }
+}
+
 @Model
 final class DownloadItem {
     @Attribute(.unique) var id: UUID
@@ -37,6 +59,7 @@ final class DownloadItem {
     var downloadedBytes: Int64
     var status: DownloadStatus
     var category: FileCategory
+    var priority: DownloadPriority
     var dateAdded: Date
     var dateCompleted: Date?
     var scheduledDate: Date?
@@ -58,7 +81,8 @@ final class DownloadItem {
         fileName: String,
         destinationPath: String,
         category: FileCategory = .other,
-        scheduledDate: Date? = nil
+        scheduledDate: Date? = nil,
+        priority: DownloadPriority = .normal
     ) {
         self.id = UUID()
         self.url = url
@@ -68,6 +92,7 @@ final class DownloadItem {
         self.downloadedBytes = 0
         self.status = scheduledDate != nil ? .scheduled : .waiting
         self.category = category
+        self.priority = priority
         self.dateAdded = Date()
         self.scheduledDate = scheduledDate
     }

@@ -3,6 +3,7 @@ import SwiftUI
 struct DownloadDetailView: View {
     @Bindable var item: DownloadItem
     @ObservedObject var downloadManager = DownloadManager.shared
+    var onClose: (() -> Void)?
     @State private var hashResult: String?
     @State private var isVerifyingHash = false
     @State private var hashInput = ""
@@ -54,9 +55,28 @@ struct DownloadDetailView: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
                     .lineLimit(2)
-                StatusBadge(status: item.status)
+                HStack(spacing: 6) {
+                    StatusBadge(status: item.status)
+                    if item.priority != .normal {
+                        Text(item.priority.rawValue)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(item.priority == .high ? Theme.error : Theme.textTertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((item.priority == .high ? Theme.error : Theme.textTertiary).opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
             }
             Spacer()
+            if let onClose = onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

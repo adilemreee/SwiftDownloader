@@ -46,7 +46,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     downloadListPanel
                     Divider().background(Theme.border)
-                    DownloadDetailView(item: item)
+                    DownloadDetailView(item: item, onClose: { selectedItem = nil })
                         .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
                 }
             } else {
